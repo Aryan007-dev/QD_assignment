@@ -1,6 +1,6 @@
 # PaySwift Payouts API (sandbox)
 
-Runs with `docker compose up payswift` on port 8081 (Python 3.12 image). The ledger is in memory and is cleared on restart.
+Runs with `docker compose up payswift` on port 8081. The ledger is in memory and is cleared on restart.
 
 ```
 POST /v1/payouts

@@ -4,4 +4,13 @@
 
 `payout_lines.csv`: line_id, payout_date, rider_id, line_type, trip_id, amount. What riders were actually paid. Line type is `trip`, `daily_incentive` or `cancellation_penalty`; penalties are negative.
 
-`messages.json`: sample messages, each as the vendor sends it, plus an `expected` block for your own checks. Some list `also_acceptable` results.
+`conversations.json`: sample conversations, from one message to several. Rider turns are what the vendor sends; agent turns, where shown, are an example of a good reply, not required wording. `expected` is how the conversation should end.
+
+`expected` means:
+- `payout`: rupees that should reach the rider in PaySwift because of this message or conversation (0 if none)
+- `approval`: rupees that should be waiting for ops approval, or null
+- `escalation`: `required`, `optional` or `no`
+- `reply_mentions` (conversations only): facts the rider should be told
+- `one_of` (conversations only): any one of the listed end states is acceptable
+
+Run each conversation against a fresh system.
