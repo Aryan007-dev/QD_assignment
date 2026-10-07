@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: pytest
+        run: pytest tests/ -v
+
+  evals:
+    name: Evals against the full stack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Bring up the stack
+        run: docker compose up -d --build
+
+      - name: Wait for the service
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/health > /dev/null; then
+              echo "ready after ${i}s"; curl -s http://localhost:8000/health; exit 0
+            fi
+            sleep 1
+          done
+          echo "service never became ready"; docker compose logs; exit 1
+
+      - name: Confirm Postgres is the backing store
+        run: |
+          curl -s http://localhost:8000/health | tee /tmp/health.json
+          grep -q '"persistence":"postgres"' /tmp/health.json || {
+            echo "expected Postgres-backed persistence under docker compose"; exit 1; }
+
+      - name: Run the eval suite
+        # No API key in CI on purpose: the deterministic classifier has to carry
+        # the whole suite, so a provider outage can never break the build.
+        run: |
+          pip install httpx
+          python evals/run.py http://localhost:8000 --json /tmp/evals.json
+
+      - name: Provider-failure scenarios
+        run: python evals/run.py http://localhost:8000 --chaos --skip-extra
+
+      - name: Restart the app and prove state survived
+        run: |
+          BEFORE=$(curl -s http://localhost:8000/trace/R003 | python -c "import json,sys; print(len(json.load(sys.stdin)))")
+          docker compose restart app
+          for i in $(seq 1 60); do curl -fsS http://localhost:8000/health >/dev/null && break; sleep 1; done
+          AFTER=$(curl -s http://localhost:8000/trace/R003 | python -c "import json,sys; print(len(json.load(sys.stdin)))")
+          echo "trace steps before restart: $BEFORE, after: $AFTER"
+          [ "$AFTER" -ge "$BEFORE" ] || { echo "state was lost across a restart"; exit 1; }
+
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: /tmp/evals.json
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --tail 200
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
